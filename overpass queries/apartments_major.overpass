@@ -1,0 +1,15 @@
+/*Overpass API Query to fetch all houses in nhood*/
+area[name="{0}"]->.nhood;
+area[name="{1}"]->.city;
+area[name="{2}"]->.state;
+(
+  way[building=apartments](area.nhood)(area.city)(area.state);
+  rel[building=apartments](area.nhood)(area.city)(area.state);
+)->.apts;
+way[highway~"^(motorway|trunk|primary|secondary|tertiary|(motorway|trunk|primary|secondary)_link)$"](area.nhood)(area.city)(area.state)->.major;
+(
+  way.apts(around.major:30);
+  rel.apts(around.major:30);
+);
+(._;>;); /*call all nodes in output recursively*/
+out;

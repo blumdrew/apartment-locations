@@ -1,0 +1,10 @@
+/*Overpass API Query to fetch all houses in nhood*/
+area[name="{0}"]->.nhood;
+area[name="{1}"]->.city;
+area[name="{2}"]->.state;
+(
+  way[building~"^(house|detached)$"](area.nhood)(area.city)(area.state);
+  rel[building~"^(house|detached)$"](area.nhood)(area.city)(area.state);
+);
+(._;>;); /*call all nodes in output recursively*/
+out;
