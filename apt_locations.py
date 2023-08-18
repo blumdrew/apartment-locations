@@ -386,13 +386,7 @@ def main(
     )
     ax.set_axis_off()
     df.boundary.plot(ax=ax,color="k")
-    centers = df["geometry"].centroid
-    #centers.plot(ax=ax, color="k", s=3)
-    names = df["Neighborhood"].values
-    for loc, name in zip(centers.values, names):
-        ax.annotate(name, (loc.x,loc.y),fontsize=3)
-    #centers.plot(ax=ax,color="k")
-
+    
     plt.savefig(
         os.path.join(
             os.path.dirname(__file__),
