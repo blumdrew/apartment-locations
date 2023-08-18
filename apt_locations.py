@@ -1,13 +1,16 @@
 """Houses vs. Apartments on Major Roads"""
 
-import geopandas as gpd
-import pandas as pd
 import os
-import overpass
-import osm2geojson
 import time
 import json
 from typing import Sequence, Tuple
+
+import geopandas as gpd
+import pandas as pd
+import numpy as np
+import overpass
+import osm2geojson
+import matplotlib.pyplot as plt
 
 def fetch_neighborhood_data(
     city: str,
@@ -22,6 +25,9 @@ def fetch_neighborhood_data(
     if os.path.isfile(out_path):
         return out_path
     os.makedirs(os.path.dirname(out_path),exist_ok=True)
+    # note: this general logic does not in fact hold for all US cities,
+    # but it does work in Portland where the city government happened to formalize
+    # neighborhood associations with hard boundaries 
     query = (
         'area[name~"^{0}$",i]->.state;\n'
         'area[name~"^{1}$",i]->.city;\n'
@@ -192,11 +198,15 @@ def relative_major_percents(
                 lambda x: x.get("building:levels", 1)
             ), errors="coerce"
         ).fillna(1,inplace=False)
-    apt_percent = len(all_apts[all_apts["on_major"]].index) / len(all_apts.index)
-    apt_floor_percent = (
-        all_apts[all_apts["on_major"]]["floors"].sum()
-        / all_apts["floors"].sum()
-    )
+    try:
+        apt_percent = len(all_apts[all_apts["on_major"]].index) / len(all_apts.index)
+        apt_floor_percent = (
+            all_apts[all_apts["on_major"]]["floors"].sum()
+            / all_apts["floors"].sum()
+        )
+    except ZeroDivisionError:
+        apt_percent = 0
+        apt_floor_percent = 0
     try:
         all_houses = all_houses[
             all_houses["id"].str.startswith("way")
@@ -205,7 +215,10 @@ def relative_major_percents(
     except Exception:
         pass
     all_houses["on_major"] = all_houses["id"].isin(maj_houses["id"])
-    house_percent = len(all_houses[all_houses["on_major"]].index) / len(all_houses.index)
+    try:
+        house_percent = len(all_houses[all_houses["on_major"]].index) / len(all_houses.index)
+    except ZeroDivisionError:
+        house_percent = 0
     return (
         apt_percent, 
         apt_floor_percent,
@@ -222,12 +235,15 @@ def main(
     replace_data: bool = False
 ):
     """compare nhoods in the city/state passed"""
+    # note that "typical" cities do not have neat neighborhood definitions
+    # that span the city like Portland does.
     nhood_data_path = fetch_neighborhood_data(city, state)
     nhood_data = gpd.read_file(nhood_data_path)
     nhood_data = nhood_data[nhood_data["type"] != "node"]
     nhood_data["name"] = nhood_data['tags'].apply(lambda x: x.get('name'))
     nhood_data["name_lower"] = nhood_data["name"].str.lower()
     nhoods = [n for n in nhood_data["name"].tolist() if n is not None]
+    # fetch each neighborhood in turn
     for nhood in nhoods:
         _d = fetch_housing_location_data(
             nhood,
@@ -287,18 +303,85 @@ def main(
         "House Major Road Percent","Total Houses","geometry"
         ]
     ]
-    df[[c for c in df.columns if c != "geometry"]].to_csv(
-        os.path.join(os.path.dirname(__file__),"test_csv.csv")
+    df["Apt House Major Road Difference"] = (
+        df["Apartment Major Road Percent"]
+        - df["House Major Road Percent"]
     )
-    df.to_file(
-        os.path.join(os.path.dirname(__file__),"test_gj.geojson"),
-        driver="GeoJSON"
+    # data output
+    df[[c for c in df.columns if c != "geometry"]].to_csv(
+        os.path.join(os.path.dirname(__file__),f"{city} {state} data.csv"),
+        index=False
     )
 
-#main(city="madison")
-#fetch_housing_location_data("Tenney-Lapham","Madison","Wisconsin")
-#p = fetch_neighborhood_data("Portland","Oregon")
-#gdf = gpd.read_file(p)
-#gdf = gdf[gdf["type"] != "node"]
-#print(gdf)
-main(fetch_all=False)
+    fig, ax = plt.subplots(1, 1)
+    # create plot for apartment percent
+    df.plot(
+        ax=ax,
+        column="Apartment Major Road Percent",
+        legend=True,
+        cmap="OrRd",
+        legend_kwds={"label": "Percent of Apartments on Major Roads"}
+    )
+    df.boundary.plot(ax=ax,color="k")
+    ax.set_axis_off()
+    plt.savefig(
+        os.path.join(
+            os.path.dirname(__file__),
+            "Apartment Major Road Percent.png"
+        ),
+        dpi=1_000
+    )
+
+    fig, ax = plt.subplots(1, 1)
+    # create plot for house percent
+    df.plot(
+        ax=ax,
+        column="House Major Road Percent",
+        legend=True,
+        cmap="OrRd",
+        legend_kwds={"label": "Percent of Houses on Major Roads"}
+    )
+    df.boundary.plot(ax=ax,color="k")
+    ax.set_axis_off()
+    plt.savefig(
+        os.path.join(
+            os.path.dirname(__file__),
+            "House Major Road Percent.png"
+        ),
+        dpi=1_000
+    )
+
+    fig, ax = plt.subplots(1, 1)
+    # create plot for relative difference percent
+    # cheeky trick to make the diverging cmap line up at 0
+    # (both these neighborhoods happen to be not residential and are outside scope)
+    df["Apt House Major Road Difference"] = np.where(
+        (df["Neighborhood"] == "northwest industrial"),
+        1,
+        df["Apt House Major Road Difference"]
+    )
+    df["Apt House Major Road Difference"] = np.where(
+        (df["Neighborhood"] == "forest park"),
+        -1,
+        df["Apt House Major Road Difference"]
+    )
+    df.plot(
+        ax=ax,
+        column="Apt House Major Road Difference",
+        legend=True,
+        cmap="seismic",
+        legend_kwds={"label": "Difference Between House and Apartment %"}
+    )
+    ax.set_axis_off()
+    df.boundary.plot(ax=ax,color="k")
+    plt.savefig(
+        os.path.join(
+            os.path.dirname(__file__),
+            "Apt House Difference Major Road Percent.png"
+        ),
+        dpi=1_000
+    )
+    return True
+
+if __name__ == "__main__":
+    main(fetch_all=True)
