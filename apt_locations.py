@@ -382,10 +382,17 @@ def main(
         column="Apt House Major Road Difference",
         legend=True,
         cmap="seismic",
-        legend_kwds={"label": "Difference Between House and Apartment %"}
+        legend_kwds={"label": "Difference Between Apartment and House %"}
     )
     ax.set_axis_off()
     df.boundary.plot(ax=ax,color="k")
+    centers = df["geometry"].centroid
+    #centers.plot(ax=ax, color="k", s=3)
+    names = df["Neighborhood"].values
+    for loc, name in zip(centers.values, names):
+        ax.annotate(name, (loc.x,loc.y),fontsize=3)
+    #centers.plot(ax=ax,color="k")
+
     plt.savefig(
         os.path.join(
             os.path.dirname(__file__),
