@@ -52,10 +52,9 @@ def fetch_housing_location_data(
     return_data: bool = True
 ) -> Sequence[gpd.GeoDataFrame]:
     """User overpass api to dynamically fetch and save data"""
-    #nhood = nhood.capitalize()
-    #city = city.capitalize()
     bp = os.path.dirname(__file__)
     out_path = os.path.join(bp, state.lower(), city.lower(), nhood.lower())
+    # look for saved data, and load
     if os.path.isdir(out_path) and not replace:
         print(f"Data for {nhood} nhood in city {city} already exists.")
         apt_all_pth = os.path.join(out_path,"apartments_all.geojson")
@@ -91,6 +90,8 @@ def fetch_housing_location_data(
 
     data = []
     print(f"Running queries for {nhood}, {city}, {state}")
+    # run overpass queries. This is a fairly slow process (~10 mins)
+    # since there are 4 queries/neighborhood + 40 neighborhoods in Portland
     for q_idx, q in enumerate(queries_to_run):
         _retries = 3
         with open(q, 'r') as f:
@@ -164,7 +165,9 @@ def relative_major_percents(
     city: str = "portland",
     state: str = "oregon"
 ) -> Tuple[float, float]:
-    """quick and dirty lads"""
+    """Read cached data, then just divide major road numbers by
+    total numbers for apartments and detatched houses
+    """
     bp = os.path.dirname(__file__)
     all_apts = gpd.read_file(
         os.path.join(bp,state,city,nhood,'apartments_all.geojson')
@@ -178,7 +181,8 @@ def relative_major_percents(
     maj_houses = gpd.read_file(
         os.path.join(bp,state,city,nhood,'houses_major.geojson')
     )
-    # pct of apartments on major roads
+    # percent of apartments on major roads
+    # first, filter out bad tags from OSM
     try:
         all_apts = all_apts[
             all_apts["id"].str.startswith("way")
@@ -187,6 +191,7 @@ def relative_major_percents(
     except Exception:
         pass
     all_apts["on_major"] = all_apts["id"].isin(maj_apts["id"])
+    # percent of apartment floors on major roads
     try:
         all_apts["floors"] = pd.to_numeric(
             all_apts["building:levels"],
@@ -207,6 +212,7 @@ def relative_major_percents(
     except ZeroDivisionError:
         apt_percent = 0
         apt_floor_percent = 0
+    # try to filter out bad tags
     try:
         all_houses = all_houses[
             all_houses["id"].str.startswith("way")
@@ -219,6 +225,7 @@ def relative_major_percents(
         house_percent = len(all_houses[all_houses["on_major"]].index) / len(all_houses.index)
     except ZeroDivisionError:
         house_percent = 0
+        
     return (
         apt_percent, 
         apt_floor_percent,
@@ -232,7 +239,8 @@ def main(
     state: str = "Oregon",
     city: str = "Portland",
     fetch_all: bool = False,
-    replace_data: bool = False
+    replace_data: bool = False,
+    errors: str = "ignore"
 ):
     """compare nhoods in the city/state passed"""
     # note that "typical" cities do not have neat neighborhood definitions
@@ -244,7 +252,8 @@ def main(
     nhood_data["name_lower"] = nhood_data["name"].str.lower()
     nhoods = [n for n in nhood_data["name"].tolist() if n is not None]
     # fetch each neighborhood in turn
-    for nhood in nhoods:
+    for idx, nhood in enumerate(nhoods):
+        print(f"Fetching data for neighborhood {idx+1} out of {len(nhoods)}")
         _d = fetch_housing_location_data(
             nhood,
             city,
@@ -270,7 +279,10 @@ def main(
         except Exception as e:
             print(f"No data found for {nhood}")
             print(e)
-            continue
+            if errors == "ignore":
+                continue
+            else:
+                raise
         p_statement = (
             f"Neighborhood {nhood} has {round(100*apt,2)}% of apartments "
             f"and {round(100*apt_floor,2)}% of apartment floors "
